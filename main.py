@@ -3,6 +3,7 @@
 
 import argparse
 import sys
+import os
 from seating_allocator import SeatingAllocator
 from logger_setup import setup_logging
 
@@ -38,6 +39,14 @@ def main():
 
         # Step 3: Write the output Excel files
         alloc.write_outputs()
+        photos_dir = "photos"  # or read from CLI / config
+        no_image_icon = os.path.join(photos_dir, "no_image_available.png")
+        try:
+            alloc.generate_attendance_pdfs(photos_dir=photos_dir,
+                                           no_image_icon=no_image_icon)
+        except Exception:
+            logger.error("Errors occurred during attendance PDF generation.")
+
 
         logger.info('✅ Completed seating allocation successfully!')
 

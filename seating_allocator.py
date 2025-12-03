@@ -7,6 +7,7 @@ import math
 import pandas as pd
 from collections import defaultdict
 from io_utils import read_excel_file
+from attendance_pdf import build_attendance_pdf
 
 # NOTE: config.RO OMS / ADJACENCY are not used here because room capacity is loaded from excel.
 # If you still want to use config, import it and merge with loaded rooms.
@@ -281,7 +282,15 @@ class SeatingAllocator:
                 date = entry['Date']
                 day = entry['Day']
                 # folder name: convert date like 30-04-2016 -> 30_04_2016 (replace non-alnum with _)
-                date_folder_name = str(date).replace('-', '_').replace('/', '_').replace(' ', '_').replace(':','_')
+                # Remove unwanted time (like "00:00:00")
+                date_only = str(date).split()[0]
+
+                date_folder_name = (
+                    date_only
+                    .replace("-", "_")
+                    .replace("/", "_")
+                )
+
                 date_folder = os.path.join(self.outdir, date_folder_name)
                 morning_folder = os.path.join(date_folder, 'Morning')
                 evening_folder = os.path.join(date_folder, 'Evening')
@@ -417,3 +426,89 @@ class SeatingAllocator:
         except Exception as e:
             self.logger.exception("Error writing outputs: %s", e)
             raise
+        # ---------------------------------------------------------------------
+        # ---------------------------------------------------------------------
+    def generate_attendance_pdfs(self, photos_dir, no_image_icon, pdf_outdir=None):
+        """
+        Generate one attendance PDF per (date, slot, room, subject).
+
+        photos_dir: folder containing ROLL.jpg (e.g. 'photos/')
+        no_image_icon: path to generic 'no image available' icon
+        pdf_outdir: root folder for PDFs (default: <self.outdir>/attendance)
+        """
+        # Decide where PDFs will be stored
+        if pdf_outdir is None:
+            pdf_outdir = os.path.join(self.outdir, "attendance")
+
+        # Make sure the folder actually exists
+        os.makedirs(pdf_outdir, exist_ok=True)
+
+        self.logger.info("Generating attendance PDFs in %s", pdf_outdir)
+
+        # Group allocations by (date, slot, room, subject)
+        grouped = {}  # key -> list of rolls
+        for slot_key, allocs in self.allocations.items():
+            for a in allocs:
+                key = (
+                    str(a["date"]),
+                    str(a["slot"]),
+                    str(a["room"]),
+                    str(a["subject"]),
+                )
+                grouped.setdefault(key, []).extend(a["rolls"])
+
+        def _sanitize(s: str) -> str:
+            """Remove characters not allowed in Windows filenames."""
+            bad = '<>:"/\\|?*'
+            for ch in bad:
+                s = s.replace(ch, "_")
+            return s.replace(" ", "_")
+
+        for (date, slot, room, subj), rolls in grouped.items():
+            # Keep order but also ensure unique
+            rolls_unique = list(dict.fromkeys(rolls))
+
+            # Build filename: YYYY_MM_DD_<SESSION>_<ROOM>_<SUBCODE>.pdf
+           # Remove unwanted time portion like "00:00:00"
+            date_only = str(date).split()[0]
+
+            date_sanitized = (
+                date_only
+                .replace("-", "_")
+                .replace("/", "_")
+                .replace(" ", "_")
+            )
+
+
+            filename = f"{date_sanitized}_{slot}_{room}_{subj}.pdf"
+            filename = _sanitize(filename)  # extra safety
+            out_path = os.path.join(pdf_outdir, filename)
+
+            # Subject name: if you have a mapping, use it; for now just use code
+            subject_name = subj
+            date_clean = str(date).split()[0]
+
+            try:
+                build_attendance_pdf(
+                    out_path=out_path,
+                    date_str=date_clean,
+                    shift=slot,
+                    room_no=room,
+                    subject_code=subj,
+                    subject_name=subject_name,
+                    roll_list=rolls_unique,
+                    roll_to_name=self.roll_name_map,
+                    photos_dir=photos_dir,
+                    no_image_icon=no_image_icon,
+                    logger=self.logger,
+                )
+                self.logger.info("Created attendance PDF: %s", out_path)
+            except Exception:
+                # Don't stop the whole run; just log and continue.
+                self.logger.error(
+                    "Error while generating attendance for %s %s %s %s",
+                    date, slot, room, subj,
+                )
+                continue
+
+        self.logger.info("Finished generating all attendance PDFs.")
