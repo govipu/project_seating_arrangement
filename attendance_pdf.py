@@ -5,6 +5,7 @@ Uses reportlab.
 """
 
 import os
+from reportlab.platypus import Image
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Image, Paragraph, Spacer
@@ -97,12 +98,26 @@ def build_attendance_pdf(
         # ----- Cards grid -----
         # Create per-student cards
         cards = []
+
+        def find_photo_path(roll_str: str) -> str | None:
+            """
+            Try common extensions for this roll; return path if found,
+            else None (so _make_card will use no_image_icon).
+            """
+            roll_str = roll_str.strip()
+            for ext in (".jpg", ".jpeg", ".png"):
+                candidate = os.path.join(photos_dir, roll_str + ext)
+                if os.path.exists(candidate):
+                    return candidate
+            return None
+
         for roll in roll_list:
             roll_str = str(roll).strip()
             name = roll_to_name.get(roll_str, "(name not found)")
-            photo_path = os.path.join(photos_dir, f"{roll_str}.jpg")
+            photo_path = find_photo_path(roll_str)  # may be None
             card = _make_card(roll_str, name, photo_path, no_image_icon, styles)
             cards.append(card)
+
 
         # Lay them out 3 per row (like sample)
         ncols = 3
