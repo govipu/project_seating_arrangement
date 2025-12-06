@@ -380,52 +380,81 @@ class SeatingAllocator:
 
     # ---------------------------------------------------------------------
     def write_outputs(self):
-        """Write master overall file and seats-left summary."""
+        """Write:
+        1) master overall seating file
+        2) per-day, per-slot seats-left file (multi-sheet XLSX)
+        """
         try:
-            # overall seating arrangement master file
+            # -------- 1. Overall seating arrangement (same as before) ----------
             rows = []
             for slot_key, allocs in self.allocations.items():
                 for a in allocs:
                     rows.append({
-                        'Date': a['date'],
-                        'Day': a.get('day', ''),
-                        'course_code': a['subject'],
-                        'Room': a['room'],
-                        'Allocated_students_count': len(a['rolls']),
-                        'Roll_list (semicolon separated)': ';'.join(a['rolls'])
+                        "Date": a["date"],
+                        "Day": a.get("day", ""),
+                        "course_code": a["subject"],
+                        "Room": a["room"],
+                        "Allocated_students_count": len(a["rolls"]),
+                        "Roll_list (semicolon separated)": ";".join(a["rolls"]),
                     })
+
             df_overall = pd.DataFrame(rows)
-            op1 = os.path.join(self.outdir, 'op_overall_seating_arrangement.xlsx')
+            op1 = os.path.join(self.outdir, "op_overall_seating_arrangement.xlsx")
             df_overall.to_excel(op1, index=False)
 
-            # seats left: we compute allotted per room across allocations
-            room_allotted = {}
+            # -------- 2. Seats left: per date & slot in one workbook ----------
+
+            # Group allocations by (date, slot) first
+            from collections import defaultdict
+
+            grouped = defaultdict(list)  # (date, slot) -> list[alloc]
             for slot_key, allocs in self.allocations.items():
                 for a in allocs:
-                    rcode = a['room']
-                    room_allotted[rcode] = room_allotted.get(rcode, 0) + len(a['rolls'])
+                    key = (str(a["date"]), str(a["slot"]))
+                    grouped[key].append(a)
 
-            seats_rows = []
-            for r in self.room_capacity:
-                allotted = room_allotted.get(r['room_code'], 0)
-                vacant = max(0, r['capacity'] - allotted)
-                seats_rows.append({
-                    'Room No.': r['room_code'],
-                    'Exam Capacity': r['capacity'],
-                    'Block': r['building'],
-                    'Alloted': allotted,
-                    'Vacant (B-C)': vacant
-                })
+            op2 = os.path.join(self.outdir, "op_seats_left.xlsx")
 
-            df_seats = pd.DataFrame(seats_rows)
-            op2 = os.path.join(self.outdir, 'op_seats_left.xlsx')
-            df_seats.to_excel(op2, index=False)
+            with pd.ExcelWriter(op2, engine="xlsxwriter") as writer:
+                for (date, slot), allocs in grouped.items():
+                    # count students per room for this (date, slot)
+                    room_allotted = {r["room_code"]: 0 for r in self.room_capacity}
+                    for a in allocs:
+                        rcode = a["room"]
+                        room_allotted[rcode] = room_allotted.get(rcode, 0) + len(a["rolls"])
+
+                    seats_rows = []
+                    for r in self.room_capacity:
+                        allotted = room_allotted.get(r["room_code"], 0)
+                        vacant = max(0, r["capacity"] - allotted)
+                        seats_rows.append({
+                            "Room No.": r["room_code"],
+                            "Exam Capacity": r["capacity"],
+                            "Block": r["building"],
+                            "Alloted": allotted,
+                            "Vacant (B-C)": vacant,
+                        })
+
+                    df_seats = pd.DataFrame(seats_rows)
+
+                    # Sheet name: e.g. 2016_05_01_Morning (must be <=31 chars, no /:\*?[])
+                    date_only = str(date).split()[0].replace("-", "_").replace("/", "_")
+                    sheet_name = f"{date_only}_{slot}"
+                    # Clean up characters not allowed in sheet names
+                    bad = '[]:*?/\\'
+                    for ch in bad:
+                        sheet_name = sheet_name.replace(ch, "_")
+                    if len(sheet_name) > 31:
+                        sheet_name = sheet_name[:31]
+
+                    df_seats.to_excel(writer, sheet_name=sheet_name, index=False)
 
             self.logger.info("Wrote output files: %s and %s", op1, op2)
 
         except Exception as e:
             self.logger.exception("Error writing outputs: %s", e)
             raise
+
         # ---------------------------------------------------------------------
         # ---------------------------------------------------------------------
     def generate_attendance_pdfs(self, photos_dir, no_image_icon, pdf_outdir=None):
