@@ -3,3 +3,4 @@ pandas
 openpyxl          # Excel reading
 reportlab         # if you use ReportLab for PDFs
 Pillow            # if attendance_pdf uses images
+xlsxwriter
