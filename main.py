@@ -34,7 +34,7 @@ def main():
         # Step 1: Load input sheets
         alloc.load_inputs()
 
-        # Step 2: Perform all allocations
+        # Step 2: Perform all allocation
         alloc.allocate_all_days()
 
         # Step 3: Write the output Excel files
